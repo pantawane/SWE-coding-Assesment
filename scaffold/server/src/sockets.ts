@@ -1,5 +1,6 @@
 import type { Server } from 'node:http';
 import { WebSocket, WebSocketServer } from 'ws';
+import { config } from './config.js';
 import { canAccess, session } from './auth.js';
 import { read } from './store.js';
 
@@ -11,6 +12,7 @@ export function attachSockets(server: Server) {
     void (async () => {
       const url = new URL(req.url ?? '/', 'http://localhost');
       if (url.pathname !== '/ws') return refuse('404 Not Found');
+      if (req.headers.origin && req.headers.origin !== config.webOrigin) return refuse('403 Forbidden');
       const user = await session(req.headers.cookie);
       if (!user) return refuse('401 Unauthorized');
       const workspace = url.searchParams.get('workspace') ?? '';

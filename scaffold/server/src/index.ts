@@ -20,7 +20,7 @@ const route = (handler: (req: Request, res: Response) => Promise<unknown>) =>
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
 app.post('/webhooks/pigeon', express.raw({ type: () => true }), route(async (req, res) => {
   const match = /^t=(\d+),v1=([0-9a-f]{64})$/i.exec(req.get('x-pigeon-signature') ?? '');
-  if (!match || Math.abs(Date.now() / 1000 - Number(match[1])) > 300) return res.sendStatus(401);
+  if (!match || Math.abs(Math.floor(Date.now() / 1000) - Number(match[1])) > 300) return res.sendStatus(401);
   const body = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
   const expected = createHmac('sha256', config.pigeon.webhookSecret).update(match[1] + '.').update(body).digest();
   if (!timingSafeEqual(expected, Buffer.from(match[2], 'hex'))) return res.sendStatus(401);
@@ -57,11 +57,11 @@ app.post('/webhooks/pigeon', express.raw({ type: () => true }), route(async (req
   res.sendStatus(204);
 }));
 
-app.use(express.json());
 app.use('/__grader', (req, res, next) => {
   if (!config.graderToken || req.get('x-grader-token') !== config.graderToken) return res.sendStatus(401);
   next();
 });
+app.use(express.json());
 app.post('/__grader/reset', route(async (_req, res) => {
   await reset();
   res.sendStatus(200);
@@ -114,6 +114,7 @@ app.post('/__grader/claim', route(async (req, res) => {
 }));
 
 addAuth(app);
+app.use('/api', (_req, res, next) => { res.set('cache-control', 'no-store'); next(); });
 app.get('/api/me', route(async (req, res) => {
   const user = await session(req.headers.cookie);
   if (!user) return res.sendStatus(401);
