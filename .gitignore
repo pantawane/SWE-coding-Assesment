@@ -3,3 +3,4 @@ dist/
 .env
 .check-logs/
 dump.rdb
+.DS_Store

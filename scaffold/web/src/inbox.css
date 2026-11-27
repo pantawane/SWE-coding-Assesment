@@ -53,3 +53,9 @@ textarea { width: 100%; min-width: 0; resize: vertical; border: 1px solid #ccd6d
   .topbar, .thread-head, .composer { padding: 8px 12px; }
   .account span { display: none; }
 }
+.notes { max-height: 40%; overflow: auto; padding: .65rem 1.25rem; background: #f9fbfb; border-top: 1px solid #dbe3e7; }
+.notes summary { cursor: pointer; font-weight: 600; }
+.notes form, .notes ul { margin: .5rem 0; }
+.notes li p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.note-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: .3rem 0; }
+.note-controls input { width: min(100%, 27rem); border: 1px solid #ccd6da; border-radius: 7px; padding: .45rem; font: inherit; }

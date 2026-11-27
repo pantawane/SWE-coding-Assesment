@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import './inbox.css';
+import { Notes, type Note } from './Notes';
 
 type User = { sub: string; name: string; workspaces: { id: string; role: string }[] };
 type Conversation = { contact: string; assignee: string | null; closed: boolean; activity: string };
 type Message = { id: string; at: string; direction: 'in' | 'out'; text: string; status?: string };
-type Thread = { conversation: Conversation; messages: Message[] };
+type Thread = { conversation: Conversation; messages: Message[]; notes: Note[] };
 type Page = { conversations: Conversation[]; nextOffset: number | null };
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -185,6 +186,8 @@ function Inbox({ user }: { user: User }) {
             </div>)}
             {!thread.messages.length && <p className="muted">No messages yet.</p>}
           </div>
+          <Notes key={workspace + ':' + contact} workspace={workspace} contact={contact} notes={thread.notes}
+            save={payload => action('/notes', 'POST', payload)} />
           <form className="composer" onSubmit={send}>
             <label htmlFor="reply">Reply to customer</label>
             <div><textarea id="reply" maxLength={4000} value={draft} disabled={pending} onChange={e => setDraft(e.target.value)} rows={2} />
@@ -195,4 +198,3 @@ function Inbox({ user }: { user: User }) {
     </div>
   </main>;
 }
-

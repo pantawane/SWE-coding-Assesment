@@ -1,0 +1,7 @@
+# Decisions
+
+- I built login and a usable inbox around the signed-webhook, durable reply, and atomic claim paths. The grader endpoints call the same functions as the UI. Webhooks authenticate the raw body and only acknowledge stored changes after the write is journaled. Inbound history sorts by provider time and message ID as a tie-breaker.
+- Each MongoDB workspace document contains the contact state, messages, outbox, and ordered event history. A versioned compare-and-swap lets each mutation update state and its replay event together on the supplied standalone MongoDB instance. This keeps the model small but rewrites the document on each mutation. It can reach MongoDB's document-size limit and should be partitioned before production traffic.
+- Send leases and a paced dispatch timestamp are shared per workspace. After a crash another process can pick up an expired lease. Each retry reuses the provider idempotency key. A terminal status stays terminal if an older event arrives later.
+- Redis holds login state and sessions. Each WebSocket polls MongoDB for persisted changes after its cursor so reconnects and multiple app copies share the same history. This favors simple recovery. Polling cost grows with both history and socket count.
+- I included browser-encrypted private notes with manual key distribution. I deferred Elasticsearch search and Paybox billing to focus on inbox behavior and failure recovery. The mock IdP and default grader token are for local assessment use.

@@ -7,10 +7,11 @@ export type Message = {
   status?: Status; due?: number; lease?: string; attempts?: number;
 };
 export type Contact = { contact: string; assignee: string | null; closed: boolean; activity: string };
+export type Note = { id: string; contact: string; author: string; at: string; iv: string; ciphertext: string };
 type Frame = { seq: number; type: string; contact: string; [key: string]: unknown };
 export type Workspace = {
   _id: string; version: string; contacts: Contact[]; messages: Message[];
-  seen: string[]; frames: Frame[]; nextSend: number;
+  seen: string[]; frames: Frame[]; nextSend: number; notes?: Note[];
 };
 const collection = async () => (await getDb()).collection<Workspace>('workspaces');
 const blank = (id: string): Workspace => ({
@@ -21,7 +22,22 @@ export async function read(id: string) {
   return (await (await collection()).findOne({ _id: id })) ?? blank(id);
 }
 
-export async function change<T>(id: string, apply: (state: Workspace) => { value: T; dirty: boolean }): Promise<T> {
+type Mutation<T> = (state: Workspace) => { value: T; dirty: boolean };
+const tails = new Map<string, Promise<void>>();
+
+export async function change<T>(id: string, apply: Mutation<T>): Promise<T> {
+  const previous = tails.get(id) ?? Promise.resolve();
+  const result = previous.then(() => persist(id, apply));
+  const tail = result.then(() => undefined, () => undefined);
+  tails.set(id, tail);
+  try {
+    return await result;
+  } finally {
+    if (tails.get(id) === tail) tails.delete(id);
+  }
+}
+
+async function persist<T>(id: string, apply: Mutation<T>): Promise<T> {
   const workspaces = await collection();
   for (;;) {
     const original = await workspaces.findOne({ _id: id });

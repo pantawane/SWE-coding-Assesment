@@ -1,6 +1,6 @@
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { createServer } from 'node:http';
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { config } from './config.js';
 import { getDb } from './db.js';
 import { getRedis } from './redis.js';
@@ -125,7 +125,7 @@ const tenant = (handle: (req: Request, res: Response, workspace: string, sub: st
     const user = await session(req.headers.cookie);
     if (!user) return res.sendStatus(401);
     const workspace = req.query.workspace;
-    if (!known(workspace)) return res.sendStatus(400);
+    if (typeof workspace !== 'string') return res.sendStatus(400);
     if (!canAccess(user, workspace)) return res.sendStatus(403);
     const origin = req.get('origin');
     if (req.method !== 'GET' && origin && origin !== config.webOrigin) return res.sendStatus(403);
@@ -145,7 +145,7 @@ app.get('/api/conversations/:contact', tenant(async (req, res, workspace) => {
   const conversation = state.contacts.find(c => c.contact === req.params.contact);
   if (!conversation) return res.sendStatus(404);
   const messages = state.messages.filter(m => m.contact === conversation.contact).sort(order);
-  res.json({ conversation, messages: messages.map(({ id, at, text, direction, status }) => ({ id, at, text, direction, status })) });
+  res.json({ conversation, notes: (state.notes ?? []).filter(note => note.contact === conversation.contact), messages: messages.map(({ id, at, text, direction, status }) => ({ id, at, text, direction, status })) });
 }));
 
 app.post('/api/conversations/:contact/reply', tenant(async (req, res, workspace) => {
@@ -173,6 +173,24 @@ app.patch('/api/conversations/:contact', tenant(async (req, res, workspace) => {
   res.sendStatus(result ? 204 : 404);
 }));
 
+app.post('/api/conversations/:contact/notes', tenant(async (req, res, workspace, sub) => {
+  const { iv, ciphertext } = req.body ?? {};
+  const validBase64 = (value: unknown, min: number, max: number) =>
+    typeof value === 'string' && value.length <= Math.ceil(max * 4 / 3) && /^[A-Za-z0-9_-]+$/.test(value) &&
+    Buffer.from(value, 'base64url').length >= min && Buffer.from(value, 'base64url').length <= max;
+  if (!validBase64(iv, 12, 12) || !validBase64(ciphertext, 17, 16_400)) return res.sendStatus(400);
+  const stored = await change(workspace, state => {
+    const contact = state.contacts.find(c => c.contact === req.params.contact);
+    if (!contact) return { dirty: false, value: false };
+    const id = randomUUID();
+    const at = new Date().toISOString();
+    (state.notes ??= []).push({ id, contact: contact.contact, author: sub, at, iv, ciphertext });
+    emit(state, 'conversation.note', contact.contact, { note_id: id });
+    return { dirty: true, value: true };
+  });
+  res.sendStatus(stored ? 201 : 404);
+}));
+
 attachSockets(server);
 
 app.use((error: Error & { status?: number }, _req: Request, res: Response, _next: NextFunction) => {
@@ -184,4 +202,3 @@ await (await getDb()).command({ ping: 1 });
 await getRedis().ping();
 server.listen(config.port, () => console.log('Switchboard listening on port ' + config.port));
 startSender();
-
