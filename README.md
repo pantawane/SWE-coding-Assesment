@@ -33,11 +33,16 @@ npm run check -- --levels 5
 npm run check:full
 ```
 
-The full run writes `CHECK_REPORT.json`. It uses POSIX subprocess and process-group behavior. From Windows PowerShell, run it in an isolated Linux container after `npm run up`. The command below assumes the Compose project is named `starter`. Use your project's network name if it differs. This container runs fresh simulator processes and uses a separate MongoDB database.
+The full run writes `CHECK_REPORT.json`. It uses POSIX subprocess and process-group behavior. From Windows PowerShell, run it in an isolated Linux container after `npm run up`. The command below assumes the Compose project is named `starter`. Use your project's network name if it differs. Commit your latest changes first so the archive matches the version you want to check.
 
 ```powershell
-docker run --rm --network starter_default -v "${PWD}:/work" -v /work/scaffold/server/node_modules -w /work -e MONGO_URL=mongodb://mongo:27017/switchboard_check -e REDIS_URL=redis://redis:6379 node:22-alpine sh -c 'npm --prefix scaffold/server ci && (node harness/run-mocks.js & sleep 2; npm run check:full)'
+New-Item -ItemType Directory -Force .check-logs | Out-Null
+git archive --format=tar --output=.check-logs/source.tar HEAD
+docker run --rm --network starter_default -v "${PWD}/.check-logs:/artifacts" -w /work -e MONGO_URL=mongodb://mongo:27017/switchboard_check -e REDIS_URL=redis://redis:6379 node:22-alpine sh -c 'tar -xf /artifacts/source.tar && npm run scaffold:install && (node harness/run-mocks.js & sleep 2; npm run check:full); result=$?; if [ -f CHECK_REPORT.json ]; then cp CHECK_REPORT.json /artifacts/latest-full.json; fi; exit "$result"'
+Copy-Item .check-logs/latest-full.json CHECK_REPORT.json
 ```
+
+The container uses a separate MongoDB database and mock provider instances.
 
 Run `npm run down` when you are finished with the local services.
 
