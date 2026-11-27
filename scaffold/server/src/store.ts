@@ -23,36 +23,62 @@ export async function read(id: string) {
 }
 
 type Mutation<T> = (state: Workspace) => { value: T; dirty: boolean };
-const tails = new Map<string, Promise<void>>();
+type PendingMutation = {
+  apply: Mutation<unknown>;
+  resolve: (value: unknown) => void;
+  reject: (error: unknown) => void;
+};
 
-export async function change<T>(id: string, apply: Mutation<T>): Promise<T> {
-  const previous = tails.get(id) ?? Promise.resolve();
-  const result = previous.then(() => persist(id, apply));
-  const tail = result.then(() => undefined, () => undefined);
-  tails.set(id, tail);
-  try {
-    return await result;
-  } finally {
-    if (tails.get(id) === tail) tails.delete(id);
-  }
+const pending = new Map<string, PendingMutation[]>();
+
+export function change<T>(id: string, apply: Mutation<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const entry: PendingMutation = { apply, resolve: value => resolve(value as T), reject };
+    const queue = pending.get(id);
+    if (queue) {
+      queue.push(entry);
+    } else {
+      pending.set(id, [entry]);
+      setTimeout(() => void drain(id), 5);
+    }
+  });
 }
 
-async function persist<T>(id: string, apply: Mutation<T>): Promise<T> {
+async function drain(id: string) {
+  const queue = pending.get(id);
+  if (!queue) return;
+  while (queue.length) {
+    const batch = queue.splice(0, 128);
+    try {
+      const results = await persist(id, batch);
+      batch.forEach(({ resolve }, index) => resolve(results[index]));
+    } catch (error) {
+      batch.forEach(({ reject }) => reject(error));
+    }
+  }
+  pending.delete(id);
+}
+
+const durable = { writeConcern: { w: 1, j: true } } as const;
+
+async function persist(id: string, batch: PendingMutation[]) {
   const workspaces = await collection();
   for (;;) {
     const original = await workspaces.findOne({ _id: id });
     const state = original ?? blank(id);
     const previousVersion = state.version;
-    const { value, dirty } = apply(state);
-    if (!dirty) return value;
+    const results = batch.map(entry => entry.apply(state));
+    const values = results.map(result => result.value);
+    if (!results.some(result => result.dirty)) return values;
+
     state.version = randomUUID();
     if (original) {
-      const result = await workspaces.replaceOne({ _id: id, version: previousVersion }, state, { writeConcern: { w: 1, j: true } });
-      if (result.matchedCount) return value;
+      const result = await workspaces.replaceOne({ _id: id, version: previousVersion }, state, durable);
+      if (result.matchedCount) return values;
     } else {
       try {
-        await workspaces.insertOne(state, { writeConcern: { w: 1, j: true } });
-        return value;
+        await workspaces.insertOne(state, durable);
+        return values;
       } catch (error) {
         if ((error as { code?: number }).code !== 11000) throw error;
       }
